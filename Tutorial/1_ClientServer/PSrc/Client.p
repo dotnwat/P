@@ -16,10 +16,17 @@ enum tWithDrawRespStatus {
   WITHDRAW_ERROR
 }
 
+type tDepositReq = (source: Client, accountId: int, amount: int, rId: int);
+type tDepositResp = (accountId: int, balance: int, rId: int);
+
 // event: withdraw request (from client to bank server)
 event eWithDrawReq : tWithDrawReq;
 // event: withdraw response (from bank server to client)
 event eWithDrawResp: tWithDrawResp;
+// event: deposit request (from client to bank server)
+event eDepositReq : tDepositReq;
+// event: deposit response (from bank server to client)
+event eDepositResp: tDepositResp;
 
 
 machine Client
@@ -89,7 +96,15 @@ machine Client
     entry {
       // if I am here then the amount of money in my account should be exactly 10
       assert currentBalance == 10, "Hmm, I still have money that I can withdraw but I have reached NoMoneyToWithDraw state!";
-      print format ("No Money to withdraw, waiting for more deposits!");
+      print format ("No Money to withdraw, making a deposit!");
+      send server, eDepositReq, (source = this, accountId = accountId, amount = choose(10) + 1, rId = nextReqId);
+      nextReqId = nextReqId + 1;
+      receive {
+        case eDepositResp: (resp: tDepositResp) {
+          currentBalance = resp.balance;
+          goto WithdrawMoney;
+        }
+      }
     }
   }
 }

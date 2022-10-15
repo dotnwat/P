@@ -33,12 +33,13 @@ what was requested by the client.
 new account balance is correct and if the withdraw failed it is because the withdraw will make the account
 balance go below 10 dollars which is against the bank policies!
 ****************************************************/
-spec BankBalanceIsAlwaysCorrect observes eWithDrawReq,  eWithDrawResp, eSpec_BankBalanceIsAlwaysCorrect_Init {
+spec BankBalanceIsAlwaysCorrect observes eWithDrawReq, eWithDrawResp, eDepositReq, eDepositResp, eSpec_BankBalanceIsAlwaysCorrect_Init {
   // keep track of the bank balance for each client: map from accountId to bank balance.
   var bankBalance: map[int, int];
   // keep track of the pending withdraw requests that have not been responded yet.
   // map from reqId -> withdraw request
   var pendingWithDraws: map[int, tWithDrawReq];
+  var pendingDeposits: map[int, tDepositReq];
 
   start state Init {
     on eSpec_BankBalanceIsAlwaysCorrect_Init goto WaitForWithDrawReqAndResp with (balance: map[int, int]){
@@ -82,6 +83,26 @@ spec BankBalanceIsAlwaysCorrect observes eWithDrawReq,  eWithDrawResp, eSpec_Ban
             bankBalance[resp.accountId], resp.balance);
       }
     }
+
+    on eDepositReq do (req: tDepositReq) {
+      assert req.accountId in bankBalance,
+        format ("Unknown accountId {0} in the deposit request. Valid accountIds = {1}",
+          req.accountId, keys(bankBalance));
+      pendingDeposits[req.rId] = req;
+    }
+
+    on eDepositResp do (resp: tDepositResp) {
+      assert resp.accountId in bankBalance,
+        format ("Unknown accountId {0} in the deposit response!", resp.accountId);
+      assert resp.rId in pendingDeposits,
+        format ("Unknown rId {0} in the deposit response!", resp.rId);
+      assert resp.balance > 0, "Can only deposit positive values";
+
+      assert resp.balance == bankBalance[resp.accountId] + pendingDeposits[resp.rId].amount,
+        format ("Bank balance for the account {0} is {1} and not the expected value {2}, Bank is lying!",
+          resp.accountId, resp.balance, bankBalance[resp.accountId] + pendingDeposits[resp.rId].amount);
+      bankBalance[resp.accountId] = resp.balance;
+    }
   }
 }
 
@@ -89,13 +110,17 @@ spec BankBalanceIsAlwaysCorrect observes eWithDrawReq,  eWithDrawResp, eSpec_Ban
 GuaranteedWithDrawProgress checks the liveness (or progress) property that all withdraw requests
 submitted by the client are eventually responded.
 ***************************************************************************/
-spec GuaranteedWithDrawProgress observes eWithDrawReq, eWithDrawResp {
+spec GuaranteedWithDrawProgress observes eWithDrawReq, eWithDrawResp, eDepositReq, eDepositResp {
   // keep track of the pending withdraw requests
   var pendingWDReqs: set[int];
+  var pendingDReqs: set[int];
 
   start state NopendingRequests {
     on eWithDrawReq goto PendingReqs with (req: tWithDrawReq) {
       pendingWDReqs += (req.rId);
+    }
+    on eDepositReq goto PendingReqs with (req: tDepositReq) {
+      pendingDReqs += (req.rId);
     }
   }
 
@@ -104,12 +129,24 @@ spec GuaranteedWithDrawProgress observes eWithDrawReq, eWithDrawResp {
       assert resp.rId in pendingWDReqs,
         format ("unexpected rId: {0} received, expected one of {1}", resp.rId, pendingWDReqs);
       pendingWDReqs -= (resp.rId);
-      if(sizeof(pendingWDReqs) == 0) // all requests have been responded
+      if(sizeof(pendingWDReqs) == 0 && sizeof(pendingDReqs) == 0) // all requests have been responded
         goto NopendingRequests;
     }
 
     on eWithDrawReq goto PendingReqs with (req: tWithDrawReq){
       pendingWDReqs += (req.rId);
+    }
+
+    on eDepositResp do (resp: tDepositResp) {
+      assert resp.rId in pendingDReqs,
+        format ("unexpected rId: {0} received, expected one of {1}", resp.rId, pendingDReqs);
+      pendingDReqs -= (resp.rId);
+      if(sizeof(pendingDReqs) == 0 && sizeof(pendingWDReqs) == 0) // all requests have been responded
+        goto NopendingRequests;
+    }
+
+    on eDepositReq goto PendingReqs with (req: tDepositReq){
+      pendingDReqs += (req.rId);
     }
   }
 }
