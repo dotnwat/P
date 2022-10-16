@@ -13,7 +13,7 @@ type tWriteTransResp = (transId: int, status: tTransStatus);
 type tReadTransReq = (client: Client, key: string);
 // payload type associated with the `eReadTransResp` event where `val` is the value corresponding to
 // the `key` in the read request and `status` is the read status (e.g., success or failure)
-type tReadTransResp = (key: string, val: int, status: tTransStatus);
+type tReadTransResp = (key: string, val: int, status: tTransStatus, transId: int);
 
 // transaction status
 enum tTransStatus {
@@ -77,6 +77,9 @@ machine Coordinator
       participants = payload;
       timer = CreateTimer(this);
       // inform all participants that I am the coordinator
+      // is there any particular benefit to having the coordinator wire up the
+      // participants vs the test harness when the particpants and the
+      // coordinator are created?
       BroadcastToAllParticipants(eInformCoordinator, this);
       goto WaitForTransactions;
     }
@@ -110,6 +113,8 @@ machine Coordinator
 
   state WaitForPrepareResponses {
     // defer requests, we are going to process transactions sequentially
+    // doesn't seem scalable. if i had a bunch of states would i have to
+    // annotate all of them to prevent new txn messages from arriving async?
     defer eWriteTransReq;
 
     on ePrepareResp do (resp : tPrepareResp) {
